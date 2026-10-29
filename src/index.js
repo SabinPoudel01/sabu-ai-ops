@@ -471,13 +471,13 @@ export default {
     const url=new URL(req.url);
     try {
       if(url.pathname==='/health') return j({ok:true,app:'Sabu AI Ops',version:'1.1.0'});
-      if(url.pathname.startsWith('/webhooks/github')) return githubWebhook(req,env);
+      if(url.pathname.startsWith('/webhooks/github')) return await githubWebhook(req,env);
       if(url.pathname==='/twilio/status'&&req.method==='POST') {
         const form=new URLSearchParams(await req.text());if(!await twilioValid(req,env,form))return err('INVALID_TWILIO_SIGNATURE',403);
         await env.DB.prepare('UPDATE calls SET state=?,seconds=?,finished_at=? WHERE id=?').bind(String(form.get('CallStatus')||'unknown').slice(0,30),clamp(form.get('CallDuration')||0,0,3600),iso(),url.searchParams.get('id')).run();return new Response('ok');
       }
-      if(url.pathname.startsWith('/twilio/')) return req.method==='POST'?handleTwilio(req,env,url):err('METHOD_NOT_ALLOWED',405);
-      if(url.pathname.startsWith('/api/')) return api(req,env,url);
+      if(url.pathname.startsWith('/twilio/')) return req.method==='POST'?await handleTwilio(req,env,url):err('METHOD_NOT_ALLOWED',405);
+      if(url.pathname.startsWith('/api/')) return await api(req,env,url);
       return env.ASSETS.fetch(req);
     } catch(e) {
       console.error('Request error',url.pathname,String(e?.message||e).slice(0,100));
