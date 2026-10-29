@@ -11,12 +11,21 @@ function tell(message,isError=false){toastEl.textContent=message;toastEl.classNa
 async function request(path,method='GET',body){
   const opts={method,headers:{}};
   if(body!==undefined){opts.headers['content-type']='application/json';opts.body=JSON.stringify(body)}
-  const r=await fetch(path,opts);const j=await r.json().catch(()=>({error:'INVALID_SERVER_RESPONSE'}));
-  if(!r.ok) throw Error(j.error||('HTTP '+r.status));return j;
+  const r=await fetch(path,opts);
+  const raw=await r.text();
+  let data;
+  try { data=JSON.parse(raw) } catch {
+    const errorCode=raw.match(/(?:Error\s*|error code[\s:]*)(1101|1102|1027)\b/i)?.[1];
+    const detail=errorCode==='1102'?'Worker CPU limit exceeded':errorCode==='1101'?'Worker exception':errorCode==='1027'?'Free request limit exceeded':'Worker returned HTML or non-JSON';
+    throw Error(`Cloudflare ${errorCode||r.status}: ${detail}. Check Worker Logs.`);
+  }
+  if(!r.ok) throw Error(data.error||('HTTP '+r.status));return data;
 }
 async function start(){try{state.boot=await request('/api/bootstrap');if(state.boot.needsSetup)return renderSetup();try{state.user=await request('/api/session');renderLayout();await openInitialPage()}catch{return renderLogin()}}catch(e){app.innerHTML=`<div class="boot"><div class="brand-logo">S</div><h3>Backend not ready</h3><span>${esc(e.message)}</span><p class="muted">Check Cloudflare deployment and D1 migration.</p></div>`}}
 function authShell(title,subtitle,body){app.innerHTML=`<div class="auth"><div class="auth-left"><div class="flex"><span class="brand-logo">S</span><b>Sabu AI Ops</b></div><span class="eyebrow">Free-first cloud control</span><h1>Your projects,<br>always in view.</h1><p>Monitor websites and GitHub incidents, manage eligible free AI and calling providers, and keep paid spending disabled.</p></div><div class="auth-right"><div class="auth-box"><h2>${title}</h2><p class="muted">${subtitle}</p>${body}</div></div></div>`}
-function renderSetup(){authShell('Create admin account','One-time secure setup after deployment.',`<form id="setup" class="form">${field('Bootstrap token','setupToken','password','Secret added to Cloudflare')}${field('Admin username','username','text','owner')}${field('Strong password (14+ characters)','password','password','Use a unique password')}<button class="btn primary" type="submit">Create secure admin</button><p class="small muted">Bootstrap token is stored in Cloudflare Secrets, not in this app or database.</p></form>`);
+function renderSetup(){const checks=state.boot?.setupChecks;
+  const warning=checks&&(!checks.bootstrapToken||!checks.encryptionKey)?`<div class="notice warn">Cloudflare configuration incomplete: ${!checks.bootstrapToken?'BOOTSTRAP_TOKEN ':''}${!checks.encryptionKey?'ENCRYPTION_KEY':''}. Add missing Worker Secrets before creating an admin.</div>`:'';
+  authShell('Create admin account','One-time secure setup after deployment.',warning+`<form id="setup" class="form">${field('Bootstrap token','setupToken','password','Secret added to Cloudflare')}${field('Admin username','username','text','owner')}${field('Strong password (14+ characters)','password','password','Use a unique password')}<button class="btn primary" type="submit">Create secure admin</button><p class="small muted">Bootstrap token is stored in Cloudflare Secrets, not in this app or database.</p></form>`);
   document.querySelector('#setup').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));try{await request('/api/setup','POST',b);tell('Admin created. Please sign in.');renderLogin()}catch(x){tell(x.message,true)}}}
 function renderLogin(){authShell('Welcome back','Sign in to your private assistant dashboard.',`<form id="login" class="form">${field('Username','username')}${field('Password','password','password')}<button class="btn primary" type="submit">Sign in securely →</button></form><p class="small muted">No paid API calls are enabled by default.</p>`);
   document.querySelector('#login').onsubmit=async e=>{e.preventDefault();try{await request('/api/login','POST',Object.fromEntries(new FormData(e.target)));state.user=await request('/api/session');renderLayout();await openInitialPage()}catch(x){tell(x.message,true)}}}
