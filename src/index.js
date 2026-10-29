@@ -13,6 +13,23 @@ async function passHash(password,salt) {
   const key=await crypto.subtle.importKey('raw',te.encode(password),'PBKDF2',false,['deriveBits']);
   return hex(await crypto.subtle.deriveBits({name:'PBKDF2',salt:b64ToBytes(salt),iterations:120000,hash:'SHA-256'},key,256));
 }
+// Cloudflare Workers Free has a 10 ms CPU budget. PBKDF2(120000) can exceed
+// that limit, especially during first-time admin creation or login. New logins
+// use a secret-keyed verifier derived via HKDF from the private encryption key.
+// This resists offline password guessing from a stolen database without the
+// separately stored Worker secret. Older PBKDF2 hashes remain readable.
+async function passwordVerifier(env, password, salt) {
+  if (!env.ENCRYPTION_KEY) throw Error('MISSING_ENCRYPTION_KEY');
+  const master = b64ToBytes(env.ENCRYPTION_KEY);
+  if (master.length !== 32) throw Error('INVALID_ENCRYPTION_KEY');
+  const kdf = await crypto.subtle.importKey('raw', master, 'HKDF', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({
+    name: 'HKDF', hash: 'SHA-256', salt: te.encode('sabu-ai-ops-auth-2026'),
+    info: te.encode('admin-password-verifier-v2')
+  }, kdf, {name: 'HMAC', hash: 'SHA-256', length: 256}, false, ['sign']);
+  const signature = await crypto.subtle.sign('HMAC', key, te.encode(salt + ':' + password));
+  return 'hmac-v2:' + hex(signature);
+}
 async function cryptKey(env) {
   if (!env.ENCRYPTION_KEY) throw Error('MISSING_ENCRYPTION_KEY');
   const bytes=b64ToBytes(env.ENCRYPTION_KEY);
@@ -269,7 +286,8 @@ async function api(req,env,url) {
   const method=req.method,path=url.pathname;
   if(method==='GET'&&path==='/api/bootstrap') {
     const count=await env.DB.prepare('SELECT COUNT(*) AS count FROM admins').first();
-    return j({needsSetup:!count.count,zeroSpend:env.ZERO_SPEND==='true',name:env.PUBLIC_APP_NAME||'Sabu AI Ops'});
+    return j({needsSetup:!count.count,zeroSpend:env.ZERO_SPEND==='true',name:env.PUBLIC_APP_NAME||'Sabu AI Ops',
+      setupChecks: !count.count ? {bootstrapToken:!!env.BOOTSTRAP_TOKEN,encryptionKey:!!env.ENCRYPTION_KEY} : undefined});
   }
   if(!['GET','HEAD','OPTIONS'].includes(method)&&!requireOrigin(req)) return err('ORIGIN_REQUIRED',403);
   if(method==='POST'&&path==='/api/setup') {
@@ -280,7 +298,7 @@ async function api(req,env,url) {
     if(b.setupToken!==env.BOOTSTRAP_TOKEN) return err('INVALID_SETUP_TOKEN',403);
     if(!/^[a-zA-Z0-9_.-]{3,32}$/.test(b.username||'')||String(b.password||'').length<14||String(b.password||'').length>256) return err('USERNAME_OR_PASSWORD_INVALID');
     const salt=bytesToB64(crypto.getRandomValues(new Uint8Array(16)));
-    const hash=await passHash(b.password,salt);
+    const hash=await passwordVerifier(env,b.password,salt);
     await env.DB.prepare('INSERT INTO admins(id,username,password_salt,password_hash,created_at) VALUES(?,?,?,?,?)').bind(newId(),b.username,salt,hash,iso()).run();
     return j({ok:true});
   }
@@ -290,7 +308,11 @@ async function api(req,env,url) {
     if(attempt&&attempt.count>=6&&Date.now()-attempt.first_at<15*60000) return err('LOGIN_LOCKED_15_MINUTES',429);
     const user=await env.DB.prepare('SELECT * FROM admins WHERE username=?').bind(String(b.username||'')).first();
     const password=String(b.password||'');
-    const matches=!!user&&password.length<257&&await passHash(password,user.password_salt)===user.password_hash;
+    const expected=user?.password_hash||'';
+    const actual=user&&password.length<257?(expected.startsWith('hmac-v2:')
+      ?await passwordVerifier(env,password,user.password_salt)
+      :await passHash(password,user.password_salt)):'';
+    const matches=!!user&&constantEquals(actual,expected);
     if(!matches) {
       const first=attempt&&Date.now()-attempt.first_at<15*60000?attempt.first_at:Date.now();
       const count=attempt&&first===attempt.first_at?attempt.count+1:1;
