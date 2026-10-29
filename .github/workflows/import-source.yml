@@ -1,0 +1,30 @@
+name: Import Sabu AI Ops application files
+on:
+  push:
+    paths:
+      - '.bootstrap/source.tar.xz'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack the verified application source
+        run: |
+          set -euo pipefail
+          test -f .bootstrap/source.tar.xz
+          tar -tJf .bootstrap/source.tar.xz | grep -q '^./src/index.js$'
+          tar -xJf .bootstrap/source.tar.xz -C .
+          test -f package.json
+          test -f wrangler.jsonc
+          test -f src/index.js
+          test -f public/app.js
+          rm -rf .bootstrap
+          rm .github/workflows/import-source.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Install Sabu AI Ops application source' || exit 0
+          git push origin HEAD:main
