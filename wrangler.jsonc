@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sabu-ai-ops",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-28",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sabu-ai-ops-db",
+      "database_id": "00000000000000000000000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "*/10 * * * *"
+    ]
+  },
+  "vars": {
+    "ZERO_SPEND": "true",
+    "PUBLIC_APP_NAME": "Sabu AI Ops"
+  }
+}

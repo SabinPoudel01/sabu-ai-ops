@@ -1,0 +1,4 @@
+# Cloudflare Deploy button requests these two secrets; enter strong private values there.
+# NEVER deploy with placeholders or commit actual values.
+BOOTSTRAP_TOKEN=ENTER_A_RANDOM_SECRET_AT_DEPLOY_TIME_MIN_32_CHARS
+ENCRYPTION_KEY=ENTER_RANDOM_BASE64_OF_32_BYTES_AT_DEPLOY_TIME

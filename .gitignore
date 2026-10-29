@@ -1,0 +1,12 @@
+node_modules/
+.wrangler/
+.env
+.dev.vars
+.dev.vars.*
+.env.*
+*.log
+!.github/**
+.DS_Store
+
+.bootstrap-token
+.secrets-local/
